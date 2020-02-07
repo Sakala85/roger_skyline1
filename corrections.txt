@@ -1,0 +1,39 @@
+#Check disk partition:
+sudo fdisk -l --bytes
+
+#check packages up-to-date:
+apt-get update
+
+#list installed packages:
+dpkg -l
+
+#list all firewall rules:
+sudo iptables -S
+sudo iptables -L
+
+#Test slowloris:
+check fail2ban log:
+	sudo cat /var/log/fail2ban.log
+unban from fail2ban: 
+	sudo fail2ban-client set [JAIL_NAME] unbanip [IP_ADDRESS]
+
+#Test ports scanning:
+from imac's terminal:
+	nmap [VM's IP_ADDRESS]
+nothing should happen
+check ban ip:
+	sudo iptables -L INPUT -v -n | less
+unban ip:	iptables -D INPUT -p all -s [IP.ADDRESS.HERE] -j DROP
+			iptables -D OUTPUT -p all -s [IP.ADDRESS.HERE] -j DROP
+
+#List services:
+	sudo service --status-all
+
+#Web part:
+
+check file:
+	/etc/apache2/sites-available/default-ssl.conf
+	/etc/apache2/sites-available/000-default.conf
+
+check only 1 active configuration for web server:
+	sudo apachectl -t -D DUMP_VHOSTS

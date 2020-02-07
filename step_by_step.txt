@@ -1,0 +1,219 @@
+#Go to root:
+	su
+
+#Install sudo:
+	apt-get install sudo
+
+#Install ssh:
+	apt-get install ssh
+
+#Update package:
+	apt-get update && apt-get upgrade
+
+#Create new user:
+	sudo adduser [user_login]
+
+Giving user sudo rights:
+	sudo adduser [user_login] sudo OR sudo usermod -aG sudo [user_login]
+
+#Setting up static IP:
+use text editor e.g : nano
+sudo nano /etc/network/interfaces
+delete the line "iface enp0s3 inet dhcp"
+add these lines:
+iface enp0s3 inet static
+	address 10.12.something.something
+	netmask 255.255.255.252
+	gateway 10.12.254.254
+netmask \30 is 255.255.255.252
+save file
+sudo service networking restart
+sudo ifup enp0s3
+Now I can connect to debian using static IP address.
+
+#Changing SSH port:
+	sudo nano /etc/ssh/sshd_config
+Modify "#Port 22" to "Port [your_port]"
+Change "#PermitRootLogin ..." to "PermitRootLogin no"
+	systemctl restart ssh
+Generate public key from imac's terminal:
+	ssh-keygen
+Copy the file ~/.ssh/id_rsa.pub from imac to ~/.ssh/authorized_keys in VM user's home dir:
+	ssh-copy-id -i ~/.ssh/id_rsa.pub user@IPAddress -p [your_port]
+go back to /etc/ssh/sshd_config and change "#PasswordAuthentication ..." to "PasswordAuthentication no"
+sudo reboot
+Login using SSH with public key:
+	ssh user@IPAddress -p [your_port]
+
+#Setting up firewall:
+Everything around firewall is in iptables. UFW is a package that handles iptables better. See DMaxence for a good use of iptables. Or just google UFW.
+install UFW package:
+sudo apt install ufw
+By default, ufw blocks all incoming connection and allow outcoming connections
+set up firewall rules for all serives used outside VM (SSH, HTTP, HTTPS):
+	- SSH: sudo ufw allow OpenSSH
+			sudo ufw allow [your_port]/tcp
+	- HTTP: sudo ufw allow http
+	- HTTPS: sudo ufw allow https
+reset ufw and delete all active rules:
+	sudo ufw reset
+
+#Set up a DOS (Denial of Service Attack) protection on your open ports of your VM:
+Install fail2ban:
+	sudo apt-get install fail2ban
+cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+sudo nano /etc/fail2ban/jail.local
+Edit the file to make it look like this:
+	[sshd]
+	# Comment...
+	enabled = true
+	port = [your_port]
+	logpath = #...
+Optinally, you can change "bantime" and "maxretry"
+sudo service fail2ban restart
+
+#Port scanning:
+Install PortSentry: apt install portsentry
+Edit /etc/default/portsentry to look like this:
+	TCP_MODE="atcp"
+	UDP_MODE="audp"
+Edit /etc/portsentry/portsentry.conf to look like this:
+	BLOCK_UDP="1"
+	BLOCK_TCP="1"
+(uncomment this KILL_ROUTE and comment all others):
+	KILL_ROUTE="/sbin/iptables -I INPUT -s $TARGET$ -j DROP"
+service portsentry restart
+
+#Stop service you don't need for this project:
+List all services:
+	systemctl list-units | grep service
+	service --status-all to list which services are running and which are stopped.
+Stop service:
+	service [service_name] stop
+
+#Automatic updating package:
+Create a script in a root folder ~:
+	sudo nano ~/update.sh
+Add these lines in that script file:
+	#!bin/sh
+	sudo apt-get update -y >> /var/update_script.log
+	sudo apt-get upgrade -y >> /var/update_script.log
+Give it permission:
+	sudo chmod 777 ~/update.sh
+Modify crontab to make scheduled task for the script:
+	sudo crontab -e
+Add these lines in crontab:
+	0 4 * * mon ~/update.sh
+	@reboot ~/update.sh
+
+Checking if cron service is on:
+	sudo systemctl enable cron
+
+#Making a script to warn all crontab edit:
+
+Install mailx (if not available)
+	sudo apt install mailx
+
+Create a script in root folder ~:
+	sudo nano ~/crontab_mo.sh
+Add these lines in that script:
+
+	#!/bin/bash
+		FILE="/var/tmp/checksum"
+		FILE_TO_WATCH="/var/spool/cron/crontabs/root"
+		VALUE=$(sudo md5sum $FILE_TO_WATCH)
+
+		if [ ! -f $FILE ]
+		then
+			echo "$VALUE" > $FILE
+			exit 0;
+		fi;
+
+		if [ "$VALUE" != "$(cat $FILE)" ];
+			then
+			echo "$VALUE" > $FILE
+			echo "$FILE_TO_WATCH has been modified ! '*_*" | mailx -s "$FILE_TO_WATCH modified !" root
+		fi;
+
+Give it permission:
+	sudo chmod 777 ~/crontab_mo.sh
+
+Check mail in /var/mail/hoang
+
+
+#Create a self signed SSL:
+	1) sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/private/apache-selfsigned.key -out /etc/ssl/certs/apache-selfsigned.crt
+
+
+	2) Fill out the prompts appropriately
+
+		Country Name (2 letter code) [AU]:FI
+			State or Province Name (full name) [Some-State]: Helsinki
+			Locality Name (eg, city) []: Helsinki
+			Organization Name (eg, company) [Internet Widgits Pty Ltd]: Hive
+			Organizational Unit Name (eg, section) []: Hive
+			Common Name (e.g. server FQDN or YOUR name) []: 10.12.168.177
+			Email Address []:hopham@student.hive.fi
+
+	3) sudo nano /etc/apache2/conf-available/ssl-params.conf
+
+		SSLCipherSuite EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH
+		SSLProtocol All -SSLv2 -SSLv3 -TLSv1 -TLSv1.1
+		SSLHonorCipherOrder On
+		# Disable preloading HSTS for now.  You can use the commented out header line that includes
+		# the "preload" directive if you understand the implications.
+		# Header always set Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		Header always set X-Frame-Options DENY
+		Header always set X-Content-Type-Options nosniff
+		# Requires Apache >= 2.4
+		SSLCompression off
+		SSLUseStapling on
+		SSLStaplingCache "shmcb:logs/stapling-cache(150000)"
+		# Requires Apache >= 2.4.11
+		SSLSessionTickets Off
+
+	4) sudo cp /etc/apache2/sites-available/default-ssl.conf /etc/apache2/sites-available/default-ssl.conf.bak
+
+	5) sudo nano /etc/apache2/sites-available/default-ssl.conf
+		<IfModule mod_ssl.c>
+				<VirtualHost _default_:443>
+						ServerAdmin hopham@student.hive.fi
+						ServerName 10.12.168.177
+
+						DocumentRoot /var/www/html
+
+						ErrorLog ${APACHE_LOG_DIR}/error.log
+						CustomLog ${APACHE_LOG_DIR}/access.log combined
+
+						SSLEngine on
+
+						SSLCertificateFile	/etc/ssl/certs/apache-selfsigned.crt
+						SSLCertificateKeyFile /etc/ssl/private/apache-selfsigned.key
+
+						<FilesMatch "\.(cgi|shtml|phtml|php)$">
+										SSLOptions +StdEnvVars
+						</FilesMatch>
+						<Directory /usr/lib/cgi-bin>
+										SSLOptions +StdEnvVars
+						</Directory>
+
+				</VirtualHost>
+			</IfModule>
+
+	6) sudo nano /etc/apache2/sites-available/000-default.conf
+
+		<VirtualHost *:80>
+				. . .
+
+				Redirect "/" "https://10.12.168.177/"
+
+				. . .
+			</VirtualHost>
+
+	7) sudo a2enmod ssl
+			sudo a2enmod headers
+			sudo a2ensite default-ssl
+			sudo a2enconf ssl-params
+			systemctl reload apache2
+
+	8) write code for your website in the file /var/www/html/index.html
