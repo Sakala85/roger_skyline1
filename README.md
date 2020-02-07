@@ -1,2 +1,2 @@
 # roger_skyline1
-project "Roger_Skyline1" in Hive Helsinki
+This project is about managing network/administration in a Linux system, and creating a web server on that system.
